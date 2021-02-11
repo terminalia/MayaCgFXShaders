@@ -43,7 +43,7 @@ float displacementAmount
 	string UIWidget = "slider";
 	string UIName = "Displacement Amount";
 	float UIMin = 0.0f;
-	float UIMax = 10.0f;
+	float UIMax = 100.0f;
 	float UIStep = 0.001f;
 	
 > = 0.0f;
