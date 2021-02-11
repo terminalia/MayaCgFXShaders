@@ -1,0 +1,187 @@
+float4x4 WorldViewProjection    :   WorldViewProjection < string UIWidget = "None"; >;
+float4x4 WorldInverseTranspose  : WorldInverseTranspose < string UIWidget = "None"; >;
+float4x4 ViewInverse            : ViewInverse           < string UIWidget = "None"; >;
+float4x4 World                  : World                 < string UIWidget = "None"; >;
+
+//--------------------------------------------- ATTRIBUTE EDITOR PARAMTERES ---------------------------------------------
+//Shader description in Maya Attribute Editor
+string description = "Normal Map";
+
+//Color parameter in Attribute Editor (" : Diffuse" annotation -> show color widget)
+float3 diffuseColor : Diffuse
+<
+    string UIName = "Diffuse Color";
+> = {1.0f, 1.0f, 1.0f};
+
+// Diffuse Texture
+texture diffuse_texture_file
+<
+	string name = "default_color.dds";
+	string UIName = "Diffuse Texture";
+	string TextureType = "2D";
+>;
+
+sampler2D Diffuse_Map = sampler_state
+{
+    //Points to texture diffuseTexture declared above
+	Texture = <diffuse_texture_file>;
+    AddressU      = Wrap;
+    AddressV      = Wrap;
+};
+
+float3 ambientColor : Diffuse
+<
+    string UIName = "Ambient Color";
+> = {0.15f, 0.15f, 0.15f};
+
+//Light direction parameter in Attribute Editor (" : Direction" annotation -> show widget to select light )
+float3 lightDirection : Direction    
+<
+    string UIName = "Light Direction";
+> = {0.0f, 1.0f, 0.0f};
+
+float fresnelPower 
+<
+	string UIWidget = "slider";
+	string UIName = "Fresnel Power";
+	float UIMin = 0.0f;
+	float UIMax = 10.0f;
+	float UIStep = 0.01f;
+	
+> = 3.0f;
+
+float specularPower 
+<
+	string UIWidget = "slider";
+	string UIName = "Glossiness";
+	float UIMin = 0.1f;
+	float UIMax = 100.0f;
+	float UIStep = 0.01f;
+	
+> = 30.0f;
+
+float3 specularColor : Diffuse
+<
+	string UIName = "Specular Color";
+> = {1.0f, 1.0f, 1.0f};
+
+//Specular Texture
+texture specular_texture_file
+<
+	string name = "default_color.dds";
+	string UIName = "Specular Texture";
+	string TextureType = "2D";
+>;
+
+sampler2D Specular_Map = sampler_state
+{
+    //Points to texture diffuseTexture declared above
+	Texture = <specular_texture_file>;
+    AddressU      = Wrap;
+    AddressV      = Wrap;
+};
+
+texture normal_texture_file
+<
+    string name = "default_color.dds";
+    string UIName = "Normal Texture";
+    string TextureType = "2D";
+>;
+
+sampler2D Normal_Map = sampler_state
+{
+    Texture = <normal_texture_file>;
+    AddressU = Wrap;
+    AddressV = Wrap;
+};
+
+float4 uvScaleTranslate 
+<
+    string UIName = "UV Scale Translate";
+> = {1.0f, 1.0f, 0.0f, 0.0f};
+//----------------------------------------------------------------------------------------------------------------------
+
+//Data coming from Maya
+struct a2v {
+    float4 position : POSITION;
+    float2 texCoord : TEXCOORD0;
+    float4 normal : NORMAL;
+    float4 binormal : BINORMAL;
+    float4 tangent : TANGENT;
+};
+//Data from vertex to fragment shader
+struct v2f {
+    float4 position : POSITION;
+    float2 texCoord : TEXCOORD0;
+    float3 worldNormal : TEXCOORD1;
+    float3 worldBinormal : TEXCOORD2;
+    float3 worldTangent : TEXCOORD3;
+    float3 eyeVector : TEXCOORD4;
+};
+
+//VERTEX SHADER
+v2f vert(a2v IN)
+{
+    v2f Out;
+    //Compute clip space positions
+    Out.position = mul(WorldViewProjection, IN.position);
+    //Compute normals in world space
+    Out.worldNormal = mul(WorldInverseTranspose, IN.normal).xyz;
+    Out.worldBinormal = mul(WorldInverseTranspose, IN.binormal).xyz;
+    Out.worldTangent = mul(WorldInverseTranspose, IN.tangent).xyz;
+
+    //Vertex position in world space
+    float3 worldPos = mul(World, IN.position);
+    //Camera position in world space is stored in w component of ViewInverse matrix
+    float3 worldCameraPos = float3(ViewInverse[0].w, ViewInverse[1].w, ViewInverse[2].w);
+    //Compute vector from camera pointing to the object vertices
+    Out.eyeVector = worldCameraPos - worldPos;
+    Out.texCoord = IN.texCoord;
+
+    return Out;
+}
+
+//FRAGMENT SHADER
+float4 frag(v2f IN) : COLOR
+{
+    float4 outColor;
+
+    float2 uv = IN.texCoord * uvScaleTranslate.xy + uvScaleTranslate.zw;
+    
+    //Compute normals using normal map
+    float3 worldNormal = tex2D(Normal_Map, uv).rgb * 2 - 1;
+    worldNormal = normalize((worldNormal.x * IN.worldTangent) + (worldNormal.y * IN.worldBinormal) + (worldNormal.z * IN.worldNormal));
+
+    //-lightDirection -> Maya known problem, invert lightDirection otherwise lighting is backward
+    float3 lightDir = normalize(-lightDirection);
+    float3 eyeVector = normalize(IN.eyeVector);
+    float3 reflectionVector = -reflect(eyeVector, worldNormal);
+
+    float4 diffuseTex = tex2D(Diffuse_Map, uv);
+    float4 specularTex = tex2D(Specular_Map, uv);
+
+    //Compute specularity
+    float3 specular = pow(saturate(dot(reflectionVector, lightDir)), specularPower) * specularColor;
+    //Compute lambert shading
+    float3 lambert = saturate(dot(lightDir, worldNormal));
+    //Compute fresnel
+    float3 fresnel = pow(1 - saturate(dot(eyeVector, worldNormal)), fresnelPower) * (lambert + ambientColor);
+    
+    float3 col = diffuseColor * diffuseTex;
+    float3 diffuseLighting = lambert + ambientColor;
+    float3 specularity = (fresnel + specular) * specularTex.rgb;
+
+    outColor.rgb = diffuseLighting * col + specularity;
+    outColor.a = 1.0f;
+
+    return outColor;
+}
+
+technique Opaque
+{
+    pass one
+    {
+        VertexShader = compile vp30 vert();
+        PixelShader = compile fp30 frag();
+    }
+}   

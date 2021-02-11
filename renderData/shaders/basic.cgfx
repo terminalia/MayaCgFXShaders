@@ -1,0 +1,41 @@
+float4x4 WorldViewProjection   :   WorldViewProjection < string UIWidget = "None"; >;
+
+string description = "Basic Shader";
+
+float3 shaderColor  :   Diffuse
+<
+    string UIName = "Diffuse Color";
+> = {1.0f, 1.0f, 1.0f};
+
+struct a2v {
+    float4 position : POSITION;  
+};
+
+struct v2f {
+    float4 position : POSITION;
+};
+
+v2f vert(a2v IN)
+{
+    v2f Out;
+
+    Out.position = mul(WorldViewProjection, IN.position);
+
+    return Out;
+}
+
+float4 frag(v2f IN) : COLOR
+{
+    float4 outColor = float4(shaderColor, 1);
+
+    return outColor;
+}
+
+technique Opaque
+{
+    pass one
+    {
+        VertexShader = compile vp30 vert();
+        PixelShader = compile fp30 frag();
+    }
+}

@@ -1,0 +1,118 @@
+float4x4 WorldViewProjection   :   WorldViewProjection < string UIWidget = "None"; >;
+float4x4 World                  : World                 < string UIWidget = "None"; >;
+
+string description = "Basic Shader";
+
+float3 shaderColor  :   Diffuse
+<
+    string UIName = "Diffuse Color";
+> = {1.0f, 1.0f, 1.0f};
+
+texture diffuse_texture_file
+<
+	string name = "default_color.dds";
+	string UIName = "Diffuse Texture";
+	string TextureType = "2D";
+>;
+
+sampler2D Diffuse_Map = sampler_state
+{
+    //Points to texture diffuseTexture declared above
+	Texture = <diffuse_texture_file>;
+    AddressU      = Wrap;
+    AddressV      = Wrap;
+};
+
+texture displacement_texture_file
+<
+	string name = "default_color.dds";
+	string UIName = "Displacement Texture";
+	string TextureType = "2D";
+>;
+
+sampler2D Displacement_Map = sampler_state
+{
+    //Points to texture diffuseTexture declared above
+	Texture = <displacement_texture_file>;
+    AddressU      = Wrap;
+    AddressV      = Wrap;
+};
+
+float displacementAmount 
+<
+	string UIWidget = "slider";
+	string UIName = "Displacement Amount";
+	float UIMin = 0.0f;
+	float UIMax = 10.0f;
+	float UIStep = 0.001f;
+	
+> = 0.0f;
+
+float animationSpeed 
+<
+	string UIWidget = "slider";
+	string UIName = "Animation Speed";
+	float UIMin = 0.0f;
+	float UIMax = 10.0f;
+	float UIStep = 0.0001f;
+	
+> = 0.0f;
+
+float4 uvScaleTranslate 
+<
+    string UIName = "UV Scale Translate";
+> = {1.0f, 1.0f, 0.0f, 0.0f};
+
+
+float time : Time;
+
+struct a2v {
+    float4 position : POSITION;
+    float2 texCoord : TEXCOORD0;
+};
+
+struct v2f {
+    float4 position : POSITION;
+    float2 texCoord : TEXCOORD0;
+};
+
+v2f vert(a2v IN)
+{
+    v2f Out;
+    
+    float2 uv = IN.texCoord * uvScaleTranslate.xy;
+    uv.x += time * animationSpeed;
+    Out.position = mul(WorldViewProjection, IN.position);
+    Out.texCoord = IN.texCoord;
+
+    float4 displacementTex = tex2Dlod(Displacement_Map, float4(uv, 0, 0));
+    Out.position.y += displacementTex.y * displacementAmount;
+
+    
+    return Out;
+}
+
+float4 frag(v2f IN) : COLOR
+{
+    float2 uv = IN.texCoord * uvScaleTranslate;
+    uv.x += time * animationSpeed;
+    //It seems that Maya override textures sampled in the Vertex Shader.
+    //A work-around is to sample the texture we want to use in the vertex shader, also in fragment shader and before the diffuse texture.
+    float4 displacementTex = tex2D(Displacement_Map, IN.texCoord);
+    float4 diffuseTex = tex2D(Diffuse_Map, IN.texCoord);
+    float4 outColor = diffuseTex;
+
+    //Then we have to multiply the outColor with the vertex shader texture
+    outColor *= displacementTex;
+
+    return outColor;
+}
+
+technique Opaque
+{
+    pass one
+    {
+        VertexShader = compile vp40 vert();
+        PixelShader = compile fp40 frag();
+    }
+}

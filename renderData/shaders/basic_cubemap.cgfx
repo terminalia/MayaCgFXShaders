@@ -1,0 +1,137 @@
+float4x4 WorldViewProjection    :   WorldViewProjection < string UIWidget = "None"; >;
+float4x4 WorldInverseTranspose  : WorldInverseTranspose < string UIWidget = "None"; >;
+float4x4 ViewInverse            : ViewInverse           < string UIWidget = "None"; >;
+float4x4 World                  : World                 < string UIWidget = "None"; >;
+
+//--------------------------------------------- ATTRIBUTE EDITOR PARAMTERES ---------------------------------------------
+//Shader description in Maya Attribute Editor
+string description = "Cube Map";
+
+//Color parameter in Attribute Editor (" : Diffuse" annotation -> show color widget)
+float3 diffuseColor : Diffuse
+<
+    string UIName = "Diffuse Color";
+> = {1.0f, 1.0f, 1.0f};
+
+float3 ambientColor : Diffuse
+<
+    string UIName = "Ambient Color";
+> = {0.15f, 0.15f, 0.15f};
+
+//Light direction parameter in Attribute Editor (" : Direction" annotation -> show widget to select light )
+float3 lightDirection : Direction    
+<
+    string UIName = "Light Direction";
+> = {0.0f, 1.0f, 0.0f};
+
+float fresnelPower 
+<
+	string UIWidget = "slider";
+	string UIName = "Fresnel Power";
+	float UIMin = 0.0f;
+	float UIMax = 10.0f;
+	float UIStep = 0.01f;
+	
+> = 3.0f;
+
+float specularPower 
+<
+	string UIWidget = "slider";
+	string UIName = "Glossiness";
+	float UIMin = 0.1f;
+	float UIMax = 100.0f;
+	float UIStep = 0.01f;
+	
+> = 30.0f;
+
+float3 specularColor : Diffuse
+<
+	string UIName = "Specular Color";
+> = {1.0f, 1.0f, 1.0f};
+
+texture reflection_texture_file
+<
+    string name = "default_cube.dds";
+    string UIName = "Reflection Texture";
+    string ResourceType = "Cube";
+>;
+
+samplerCUBE Reflection_Map = sampler_state
+{
+    Texture = <reflection_texture_file>;
+    WrapR = ClampToEdge;
+    WrapS = ClampToEdge;
+    WrapT = ClampToEdge;
+};
+//----------------------------------------------------------------------------------------------------------------------
+
+//Data coming from Maya
+struct a2v {
+    float4 position : POSITION;  
+    float4 normal : NORMAL;
+};
+
+//Data from vertex to fragment shader
+struct v2f {
+    float4 position : POSITION;
+    float3 worldNormal : TEXCOORD0;
+    float3 eyeVector : TEXCOORD1;
+};
+
+//VERTEX SHADER
+v2f vert(a2v IN)
+{
+    v2f Out;
+    //Compute clip space positions
+    Out.position = mul(WorldViewProjection, IN.position);
+    //Compute normals in world space
+    Out.worldNormal = mul(WorldInverseTranspose, IN.normal).xyz;
+    //Vertex position in world space
+    float3 worldPos = mul(World, IN.position);
+    //Camera position in world space is stored in w component of ViewInverse matrix
+    float3 worldCameraPos = float3(ViewInverse[0].w, ViewInverse[1].w, ViewInverse[2].w);
+    //Compute vector from camera pointing to the object vertices
+    Out.eyeVector = worldCameraPos - worldPos;
+
+    return Out;
+}
+
+//FRAGMENT SHADER
+float4 frag(v2f IN) : COLOR
+{
+    float4 outColor;
+    //Normalize worldNormal to prevent distortions derived from scaling
+    float3 worldNormal = normalize(IN.worldNormal);
+    //-lightDirection -> Maya known problem, invert lightDirection otherwise lighting is backward
+    float3 lightDir = normalize(-lightDirection);
+    float3 eyeVector = normalize(IN.eyeVector);
+    float3 reflectionVector = -reflect(eyeVector, worldNormal);
+
+    //float3 cubeTex = texCUBElod(Reflection_Map, float4(reflectionVector, 3));
+    float3 cubeTex = texCUBE(Reflection_Map, reflectionVector);
+    
+    //Compute specularity
+    float3 specular = pow(saturate(dot(reflectionVector, lightDir)), specularPower) * specularColor;
+    //Compute lambert shading
+    float3 lambert = saturate(dot(lightDir, worldNormal));
+    //Compute fresnel
+    float3 fresnel = pow(1 - saturate(dot(eyeVector, worldNormal)), fresnelPower) * (lambert + ambientColor);
+
+    float3 col = diffuseColor;
+    float3 diffuseLighting = lambert + ambientColor;
+    float3 specularity = ((fresnel * cubeTex.rgb) + specular);
+
+    outColor.rgb = diffuseLighting * col + specularity;
+    outColor.a = 1.0f;
+
+    return outColor;
+}
+
+technique Opaque
+{
+    pass one
+    {
+        VertexShader = compile vp40 vert();
+        PixelShader = compile fp40 frag();
+    }
+}

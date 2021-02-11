@@ -1,0 +1,74 @@
+float4x4 WorldViewProjection    :   WorldViewProjection < string UIWidget = "None"; >;
+float4x4 WorldInverseTranspose  : WorldInverseTranspose < string UIWidget = "None"; >;
+float4x4 ViewInverse            : ViewInverse           < string UIWidget = "None"; >;
+float4x4 World                  : World                 < string UIWidget = "None"; >;
+
+//Shader description in Maya Attribute Editor
+string description = "Lambert Shading";
+
+//Color parameter in Attribute Editor (" : Diffuse" annotation -> show color widget)
+float3 diffuseColor : Diffuse
+<
+    string UIName = "Diffuse Color";
+> = {1.0f, 1.0f, 1.0f};
+
+float3 ambientColor : Diffuse
+<
+    string UIName = "Ambient Color";
+> = {0.15f, 0.15f, 0.15f};
+
+//Light direction parameter in Attribute Editor (" : Direction" annotation -> show widget to select light )
+float3 lightDirection : Direction    
+<
+    string UIName = "Light Direction";
+> = {0.0f, 1.0f, 0.0f};
+
+//Data coming from Maya
+struct a2v {
+    float4 position : POSITION;  
+    float4 normal : NORMAL;
+};
+
+//Data from vertex to fragment shader
+struct v2f {
+    float4 position : POSITION;
+    float3 worldNormal : TEXCOORD0;
+};
+
+//VERTEX SHADER
+v2f vert(a2v IN)
+{
+    v2f Out;
+    //Compute clip space positions
+    Out.position = mul(WorldViewProjection, IN.position);
+    //Compute normals in world space
+    Out.worldNormal = mul(WorldInverseTranspose, IN.normal).xyz;
+
+    return Out;
+}
+
+//FRAGMENT SHADER
+float4 frag(v2f IN) : COLOR
+{
+    float4 outColor;
+    //Normalize worldNormal to prevent distortions derived from scaling
+    float3 worldNormal = normalize(IN.worldNormal);
+    //-lightDirection -> Maya known problem, invert lightDirection otherwise lighting is backward
+    float3 lightDir = normalize(-lightDirection);
+    //Compute lambert shading
+    float3 lambert = saturate(dot(lightDir, worldNormal));
+
+    outColor.rgb = (lambert + ambientColor) * diffuseColor;
+    outColor.a = 1.0f;
+
+    return outColor;
+}
+
+technique Opaque
+{
+    pass one
+    {
+        VertexShader = compile vp30 vert();
+        PixelShader = compile fp30 frag();
+    }
+}
